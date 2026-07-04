@@ -1,5 +1,6 @@
 import { OpenAI } from "openai";
 import dotenv from "dotenv";
+import axios from "axios";
 dotenv.config();
 
 const API_KEY = process.env.OPENAI_API_KEY;
@@ -7,11 +8,16 @@ const client = new OpenAI({
   apiKey: API_KEY,
 });
 
+async function getWeatherData(cityName) {
+  const url = `https://wttr.in/${cityName.toLowerCase()}?format=%C+%t+%w+%h`;
+  const response = await axios.get(url, { responseType: "text" });
+  return JSON.stringify({ city: cityName, weather: response.data });
+} //actual apiCall to get the weather data of a city
 const SYSTEM_PROMPT = `
        You are an expert AI engineer. 
        You have to analyse the user input carefully and then you need to breakdown the problem into multiple sub problems before comming to final result. Always breakdown the user intention and how to solve that problem and then step by step to solve it.
 
-       We are going to follow a pipleline of "INITIAL",
+       We are going to follow a pipleline of "INITIAL", "TOOL_REQUEST"
        "THINK", "ANALYSE", and "OUTPUT" pipeline.
 
        The Pipeline:
@@ -20,7 +26,11 @@ const SYSTEM_PROMPT = `
         -"Analyse": this is where we wil analyse the solution and also verify if the output is correct or not.
         -"THINK": We can go back to think mode where we now see if  any sub problem remain and think.
         -"ANALYSE": again analyse the problem and get onto a solution.
+        -"TOOL_REQUEST": use this for calling or requesting a tool. The format of output would be {"step": "TOOL_REUEST", functionName: "getWeatherData", "input": "Bangalore"}
         -"OUTPUT": this is where we can end and give the final output to the user.
+
+        Available Tools:
+        -"getWeatherData": getWeatherData(cityName: string): This tool can be used to get the weather information of a city. The input to this tool is the name of the city.
 
         Rules:
         -Always output one step at a time and wait for other step proceeding.
@@ -40,9 +50,21 @@ const SYSTEM_PROMPT = `
         -"THINK": "After the final substraction ans remain -12.66667"
         -"OUTPUT": "The final answer is -12.66667"
 
+        Example:
+        -"USER": what is weather of bangalore?
+        OUTPUT:
+        -"INITIAL": "The user wants me to fetch waether information of bangalore",
+        -"THINK": "Fromt the tools I can see we have a tool names getWeatherData which can help me to get the weather information of bangalore",
+        -"ANALYSE": "Yes, the tool getWeatherData is actually right and now I can call this tool to get the weather information of bangalore",
+        -"TOOL_REQUEST": {"step": "TOOL_REQUEST", functionName: "getWeatherData", "input": "Bangalore"},
+        -"TOOL_OUTPUT": "The weather of Bangalore is 25 Degree Celcius",
+        -"THINK": "Now I have the weather information of bangalore and now I can give the final output to user",
+        -"OUTPUT": "The final answer is The weather of Bangalore is 25 Degree Celcius"
+        
+
         Output Format:
         {
-        "step": "INITIAL"| "THINK"| "ANALYSE"| "OUTPUT", "text": "<The actual text>"
+        "step": "INITIAL"| "THINK"| "ANALYSE"| "OUTPUT"| "TOOL_REQUEST", "text": "<The actual text>", "functionName: "<functionName>", "input": "<input>"
         }
 
         `;
@@ -71,8 +93,30 @@ async function main(prompt = " ") {
     console.log(`🤖 (${parsedResult.step}): ${parsedResult.text}`); //print
     // If the step is OUTPUT, we can break the loop and end the process
     if (parsedResult.step.toLowerCase() === "output") break;
+
+    //cot_tool
+    if (parsedResult.step.toLowerCase() === "tool_request") {
+      const { functionName, input } = parsedResult;
+      switch (functionName) {
+        case "getWeatherData":
+          {
+            const toolOutput = await getWeatherData(input);
+            console.log(`🛠(${functionName}):${input}`, toolOutput); //toolCall
+
+            MESSAGES_DB.push({
+              role: "developer",
+              content: JSON.stringify({
+                step: "TOOL_OUTPUT",
+                output: toolOutput,
+              }),
+            });
+            continue; //continue the loop to get the next step from the model
+          }
+          break;
+      }
+    }
   }
 }
 
-// main("What is 4+6+9-3*5");
-main("What is meaning of life?");
+main("What is weather of Bangalore?");
+main("What is weather of Bangalore, Gulbarga?");
