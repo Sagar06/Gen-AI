@@ -1,7 +1,14 @@
 import { OpenAI } from "openai";
 import dotenv from "dotenv";
 import axios from "axios";
-dotenv.config();
+import { exec } from "child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, "..", ".env") });
 
 const API_KEY = process.env.OPENAI_API_KEY;
 const client = new OpenAI({
@@ -13,6 +20,16 @@ async function getWeatherData(cityName) {
   const response = await axios.get(url, { responseType: "text" });
   return JSON.stringify({ city: cityName, weather: response.data });
 } //actual apiCall to get the weather data of a city
+
+async function excuteCommandonCLI(cmd) {
+  return new Promise((res, rej) => {
+    exec(cmd, (err, out) => {
+      if (err) return res(`There was an Error ${err}`);
+      else return res(out);
+    });
+  });
+}
+
 const SYSTEM_PROMPT = `
        You are an expert AI engineer. 
        You have to analyse the user input carefully and then you need to breakdown the problem into multiple sub problems before comming to final result. Always breakdown the user intention and how to solve that problem and then step by step to solve it.
@@ -32,6 +49,7 @@ const SYSTEM_PROMPT = `
         Available Tools:
         -"getWeatherData": getWeatherData(cityName: string): This tool can be used to get the weather information of a city. The input to this tool is the name of the city.
 
+        -"excuteCommandonCLI": excuteCommandonCLI(command: string): This tool can be used to execute a command on the user device and return the output from stdout.
         Rules:
         -Always output one step at a time and wait for other step proceeding.
         -Always maintain the sequence of pipeline as given in example
@@ -95,9 +113,23 @@ async function main(prompt = " ") {
     if (parsedResult.step.toLowerCase() === "output") break;
 
     //cot_tool
-    if (parsedResult.step.toLowerCase() === "tool_request") {
+    if (parsedResult.step.toUpperCase() === "TOOL_REQUEST") {
       const { functionName, input } = parsedResult;
+
       switch (functionName) {
+        case "executeCommandonCLI": {
+          const toolResult = await excuteCommandonCLI(input);
+          console.log(`🛠(${functionName}):${input}`, toolResult); //toolCall
+          MESSAGES_DB.push({
+            role: "developer",
+            content: JSON.stringify({
+              step: "TOOL_OUTPUT",
+              output: toolResult,
+            }),
+          });
+
+          continue;
+        }
         case "getWeatherData":
           {
             const toolOutput = await getWeatherData(input);
@@ -118,5 +150,10 @@ async function main(prompt = " ") {
   }
 }
 
-main("What is weather of Bangalore?");
-main("What is weather of Bangalore, Gulbarga?");
+// main("What is weather of Bangalore?");
+// main(
+//   "What is weather of Bangalore, Gulbarga and Bidar and then write the output to a weather.text file",
+// );
+main(
+  "What is weather of Bangalore, Gulbarga and Bidar and then make a beaultiful landing page of all three weather using HTML and CSS under separate folder called weatherApp under same workspace",
+);
