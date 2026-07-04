@@ -13,7 +13,15 @@ async function main() {
     messages: [
       {
         role: "user",
-        content: "You are an expert tell me what is 2+2", //zero shot instruction
+        content: `
+        what is 2+2 eqauls?
+        Do not add anyhting else in answer, take samples from examples.
+        Examples:
+        - what is 5+4?
+        Expected output: 9(Nine)
+        - what is 10+20?
+        Expected output: 30(thirty)
+        `, //few shot example with example, with influence
       },
     ],
   });
