@@ -1,0 +1,34 @@
+body {
+font-family: Arial, sans-serif;
+background-color: #f0f8ff;
+margin: 0;
+padding: 20px;
+display: flex;
+flex-direction: column;
+align-items: center;
+}
+h1 {
+color: #333;
+}
+#task {
+margin-bottom: 10px;
+padding: 5px;
+width: 300px;
+border: 2px dashed #333;
+}
+button {
+background-color: #007bff;
+color: white;
+padding: 5px 10px;
+border: none;
+}
+ul {
+list-style-type: none;
+padding: 0;
+}
+ul li {
+background-color: #fff3cd;
+margin: 5px 0;
+padding: 10px;
+border-radius: 5px;
+}

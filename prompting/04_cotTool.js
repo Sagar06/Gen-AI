@@ -31,7 +31,14 @@ async function excuteCommandonCLI(cmd) {
 }
 
 const SYSTEM_PROMPT = `
-       You are an expert AI engineer. 
+       You are an expert AI engineer.
+       Only and Only answer questions related to the coding and engineering.  
+      
+
+       Persona: You are a senior software developer
+       - You always sound technical and use jargons
+       - You never answer back on personal things and you dont have a personal life.
+       - All you know is how and what code works.
        You have to analyse the user input carefully and then you need to breakdown the problem into multiple sub problems before comming to final result. Always breakdown the user intention and how to solve that problem and then step by step to solve it.
 
        We are going to follow a pipleline of "INITIAL", "TOOL_REQUEST"
@@ -49,11 +56,22 @@ const SYSTEM_PROMPT = `
         Available Tools:
         -"getWeatherData": getWeatherData(cityName: string): This tool can be used to get the weather information of a city. The input to this tool is the name of the city.
 
-        -"excuteCommandonCLI": excuteCommandonCLI(command: string): This tool can be used to execute a command on the user device and return the output from stdout.
+        -"executeCommandonCLI": excuteCommandonCLI(command: string): This tool can be used to execute a command on the user device and return the output from stdout.
+        
+        CLI Examples:
+        - To create a folder: "mkdir -p /path/to/folder"
+        - To create a file: "echo 'content' > /path/to/file.txt"
+        - To append to file: "echo 'content' >> /path/to/file.txt"
+        - To change directory and run command: "cd /path && ls"
+        - To create multiple files: "mkdir -p folder && echo 'content1' > folder/file1.txt && echo 'content2' > folder/file2.txt"
         Rules:
         -Always output one step at a time and wait for other step proceeding.
         -Always maintain the sequence of pipeline as given in example
         -Always follow JSON output format strictly.
+        -EVERY response MUST be valid JSON only, nothing else.
+        -NEVER output raw code, raw HTML, or any non-JSON content.
+        -All responses must start with { and end with }
+        -The JSON must have exactly these fields: "step", "text", and optionally "functionName" and "input"
 
         Example:
         -"USER": What is 2+2-5*10/3?
@@ -69,12 +87,17 @@ const SYSTEM_PROMPT = `
         -"OUTPUT": "The final answer is -12.66667"
 
         Example:
-        -"USER": what is weather of bangalore?
+        -"USER": Build a TODO application and store all files in todo folder
         OUTPUT:
-        -"INITIAL": "The user wants me to fetch waether information of bangalore",
-        -"THINK": "Fromt the tools I can see we have a tool names getWeatherData which can help me to get the weather information of bangalore",
-        -"ANALYSE": "Yes, the tool getWeatherData is actually right and now I can call this tool to get the weather information of bangalore",
-        -"TOOL_REQUEST": {"step": "TOOL_REQUEST", functionName: "getWeatherData", "input": "Bangalore"},
+        -"INITIAL": "The user wants me to build a TODO application with HTML, CSS, and JavaScript files stored in a todo folder",
+        -"THINK": "I need to create a folder structure with index.html, styles.css, and app.js files. I should use the executeCommandonCLI tool to create these files",
+        -"ANALYSE": "The best approach is to first create the todo folder, then create all the necessary files with their content",
+        -"TOOL_REQUEST": {"step": "TOOL_REQUEST", "functionName": "executeCommandonCLI", "input": "mkdir -p ../todo"},
+        -"TOOL_OUTPUT": "Folder created successfully",
+        -"THINK": "Now I need to create the index.html file with proper HTML structure for the TODO app",
+        -"TOOL_REQUEST": {"step": "TOOL_REQUEST", "functionName": "executeCommandonCLI", "input": "cat > ../todo/index.html << 'EOF'\n<!DOCTYPE html>\n<html>\n<head><title>TODO App</title><link rel='stylesheet' href='styles.css'></head>\n<body><h1>TODO List</h1><input id='task' placeholder='Add a task'><button onclick='addTask()'>Add</button><ul id='list'></ul><script src='app.js'></script></body>\n</html>\nEOF"},
+        -"TOOL_OUTPUT": "File created successfully",
+        -"OUTPUT": "The TODO application has been created successfully in the todo folder"
         -"TOOL_OUTPUT": "The weather of Bangalore is 25 Degree Celcius",
         -"THINK": "Now I have the weather information of bangalore and now I can give the final output to user",
         -"OUTPUT": "The final answer is The weather of Bangalore is 25 Degree Celcius"
@@ -82,7 +105,7 @@ const SYSTEM_PROMPT = `
 
         Output Format:
         {
-        "step": "INITIAL"| "THINK"| "ANALYSE"| "OUTPUT"| "TOOL_REQUEST", "text": "<The actual text>", "functionName: "<functionName>", "input": "<input>"
+        "step": "INITIAL"| "THINK"| "ANALYSE"| "OUTPUT"| "TOOL_REQUEST", "text": "<The actual text>", "functionName": "<functionName>", "input": "<input>"
         }
 
         `;
@@ -104,8 +127,34 @@ async function main(prompt = " ") {
       model: "gpt-4o",
       messages: MESSAGES_DB, //llm call
     });
-    const rawResult = result.choices[0].message.content;
-    const parsedResult = JSON.parse(rawResult);
+    let rawResult = result.choices[0].message.content;
+
+    // Extract JSON from markdown code block if present
+    const jsonMatch = rawResult.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+    if (jsonMatch) {
+      rawResult = jsonMatch[1];
+    }
+
+    // Try to parse the JSON, with error handling
+    let parsedResult;
+    try {
+      parsedResult = JSON.parse(rawResult.trim());
+    } catch (error) {
+      console.error("❌ Failed to parse JSON response:", error.message);
+      console.error("Raw response:", rawResult.substring(0, 200));
+      // Try to extract JSON from the response if it contains JSON object
+      const jsonObjectMatch = rawResult.match(/\{[\s\S]*\}/);
+      if (jsonObjectMatch) {
+        try {
+          parsedResult = JSON.parse(jsonObjectMatch[0]);
+        } catch (e) {
+          console.error("❌ Still failed to parse JSON. Terminating.");
+          break;
+        }
+      } else {
+        break;
+      }
+    }
 
     MESSAGES_DB.push({ role: "assistant", content: rawResult }); //pushback to the messages db
     console.log(`🤖 (${parsedResult.step}): ${parsedResult.text}`); //print
@@ -118,15 +167,22 @@ async function main(prompt = " ") {
 
       switch (functionName) {
         case "executeCommandonCLI": {
-          const toolResult = await excuteCommandonCLI(input);
-          console.log(`🛠(${functionName}):${input}`, toolResult); //toolCall
-          MESSAGES_DB.push({
-            role: "developer",
-            content: JSON.stringify({
-              step: "TOOL_OUTPUT",
-              output: toolResult,
-            }),
-          });
+          try {
+            const toolResult = await excuteCommandonCLI(input);
+            console.log(`🛠(${functionName}):${input}`, toolResult); //toolCall
+            MESSAGES_DB.push({
+              role: "developer",
+              content: JSON.stringify({
+                step: "TOOL_OUTPUT",
+                output: toolResult,
+              }),
+            });
+          } catch (error) {
+            MESSAGES_DB.push({
+              role: "developer",
+              content: JSON.stringify({ status: "error", error }),
+            });
+          }
 
           continue;
         }
@@ -154,6 +210,14 @@ async function main(prompt = " ") {
 // main(
 //   "What is weather of Bangalore, Gulbarga and Bidar and then write the output to a weather.text file",
 // );
+// main(
+//   "What is weather of Bangalore, Gulbarga and Bidar and then make a beaultiful landing page of all three weather using HTML and CSS under separate folder called weatherApp under same workspace",
+// );
+
+// main(
+//   "What is meaning of life? I am asking this because I need to wite this in an HTML file for my web dev project do not give me output as HTML as I can do this own my own just give me content in elboaratibve way for this",
+// ); //role based prompting
+
 main(
-  "What is weather of Bangalore, Gulbarga and Bidar and then make a beaultiful landing page of all three weather using HTML and CSS under separate folder called weatherApp under same workspace",
+  "Build a funny functional design working TODO application and run on browser and store all files on todo folder",
 );
