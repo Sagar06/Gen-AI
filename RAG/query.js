@@ -3,6 +3,7 @@ import { OpenAIEmbeddings } from "@langchain/openai";
 import { QdrantVectorStore } from "@langchain/qdrant";
 import { SYSTEM_PROMPT } from "@langchain/community/experimental/graph_transformers/llm";
 import OpenAI from "openai";
+import { meta } from "zod/v4/core";
 
 async function query(userQuery) {
   //Convert user query to VE
@@ -32,10 +33,11 @@ async function query(userQuery) {
   const SYSTEM_PROMPT = `
 You are an expert in answering user query based on the provided context about the document. Do not answer anything beyond the document which is not provided.
 
-Always also answer the user in short and tell on which page number that contenct is present/available.
+Always also answer the user in short and tell on which page number that contenct is present/available and provide name of the book.
 User Documents:
 ${results.map((e) =>
   JSON.stringify({
+    bookName: e.metadata.source,
     pageContent: e.pageContent,
     pageNumber: e.metadata.loc.pageNumber,
   }),
